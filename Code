@@ -1,0 +1,307 @@
+#Score: 0.71
+
+
+import pandas as pd
+import numpy as np
+
+train_path = 'D:\\bigdata\\space_titanic\\train.csv'
+test_path = 'D:\\bigdata\\space_titanic\\test.csv'
+
+train = pd.read_csv(train_path,encoding='cp949')
+
+
+pd.set_option('display.max.columns', 40)
+
+
+
+
+#################train 전처리
+
+train_col = train.columns
+
+na_col = []
+for i in train_col:
+    if sum(train[i].isnull())> 0:
+        na_col.append(i)
+        print(i,train[i].isnull().sum())
+    
+
+
+train['RoomService'] = train['RoomService'].fillna(0)
+train['FoodCourt'] = train['FoodCourt'].fillna(0)
+train['ShoppingMall'] = train['ShoppingMall'].fillna(0)
+train['Spa'] = train['Spa'].fillna(0)
+train['VRDeck'] = train['VRDeck'].fillna(0)
+
+
+na_col = []
+for i in train_col:
+    if sum(train[i].isnull())> 0:
+        na_col.append(i)
+        print(i,train[i].isnull().sum())
+
+train['Name'] = train['Name'].fillna(99999)
+
+train2 = train.dropna(axis=0)
+
+train2['PassengerId'] = train2['PassengerId'].str[:4]
+
+train2[['deck','num','side']] = train2['Cabin'].str.split('/',expand=True)
+
+
+train2.CryoSleep = train2.CryoSleep.replace({True: 1, False: 0})
+train2.VIP = train2.VIP.replace({True: 1, False: 0})
+train2.Transported = train2.Transported.replace({True: 1, False: 0})
+
+train2 = train2.drop('Cabin',axis=1)
+
+train2[['name1','name2']] = train2['Name'].str.split(' ',expand=True)
+
+train2 = train2.drop(['Name','name1'],axis=1)
+train2['name2'] = train2['name2'].fillna(9999)
+
+list(set(train2['HomePlanet']))
+
+#ID와 성이 같을경우 가족끼리 함께 탑승한것이라 판단 성이 다를경우 완전한 페밀리가 아니라 판단
+
+
+pname = train2.groupby(['PassengerId','name2']).Age.count()
+pname2 = pname.reset_index().groupby('PassengerId').Age.max().reset_index()
+pname3 = pname.reset_index()
+pname_dic = {}
+a = pname3[pname3.PassengerId == '0020']
+b = pname2[pname2.PassengerId == '0020']
+
+c = a.index[0]
+a.PassengerId[c]
+
+for i in pname2.PassengerId:
+    pname_list = pname3[pname3.PassengerId == i]
+    pname2_list = pname2[pname2.PassengerId == i]
+    for j in range(pname_list.shape[0]):
+        j2 = pname_list.index[j]
+        j3 = pname2_list.index[0]
+        if (pname_list.PassengerId[j2] == pname2_list.PassengerId[j3]) and (pname_list.Age[j2] == pname2_list.Age[j3]):
+            pname_dic[pname2_list.PassengerId[j3]] = pname_list.name2[j2]
+
+train2 = train2.reset_index()
+train2 = train2.drop('index',axis=1)
+
+name_check_list = []
+
+for i in range(train2.shape[0]):
+    if train2.name2[i] == pname_dic[train2.PassengerId[i]]:
+        name_check_list.append(1)
+    else:
+        name_check_list.append(0)
+
+train2['name_ok'] = name_check_list
+
+train4 = train2.drop(['PassengerId','name2'],axis=1)
+
+
+#one hot incoding
+train4.dtypes
+train4.num = train4.num.astype('int')
+train4 = pd.get_dummies(train4)
+train4
+
+
+#train data 학습, 예
+train = train4.drop('Transported',axis=1)
+test = train4.Transported
+
+from sklearn.model_selection import train_test_split
+x_train,x_test,y_train,y_test = train_test_split(train,test,test_size = 0.2)
+
+from sklearn.preprocessing import StandardScaler
+
+ss = StandardScaler()
+x_train_ss = ss.fit_transform(x_train)
+x_test_ss = ss.fit_transform(x_test)
+
+
+from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier
+
+model = XGBClassifier()
+model.fit(x_train_ss,y_train)
+
+model.score(x_train_ss,y_train)
+
+predict = model.predict_proba(x_test_ss)
+predict = pd.DataFrame(predict)
+test_predict = predict[1]>0.5
+test_predict = test_predict.replace({True:1,False:0})
+
+from sklearn.metrics import confusion_matrix,f1_score
+
+confusion_matrix(y_test,test_predict)
+f1_score(y_test,test_predict)
+
+##feature importance
+
+f_importance = model.feature_importances_
+col = train.columns
+imp_f = pd.DataFrame([col,f_importance])
+imp_f = imp_f.T
+imp_f.columns = ['Col','Imp']
+imp_f[imp_f.Imp > 0.015]
+
+from sklearn.inspection import permutation_importance
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set(font="NanumGothic",
+        rc={"axes.unicode_minus":False},
+        style='whitegrid')
+sns.boxplot(x='Imp',y='Col',data = imp_f)
+plt.show()
+
+
+
+#수정된 변수 학습
+train3 = train2.drop(['PassengerId','name2'],axis=1)
+train33 = train3[['CryoSleep','RoomService','FoodCourt','ShoppingMall','Spa','VRDeck','HomePlanet'
+                 ,'Destination','deck','side']]
+train33
+
+
+train33.dtypes
+train33 = pd.get_dummies(train33)
+
+
+
+from sklearn.model_selection import train_test_split
+x_train,x_test,y_train,y_test = train_test_split(train33,test,test_size = 0.33)
+
+from sklearn.preprocessing import StandardScaler
+
+ss = StandardScaler()
+x_train_ss = ss.fit_transform(x_train)
+x_test_ss = ss.fit_transform(x_test)
+
+
+from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier
+
+model = XGBClassifier()
+model.fit(x_train_ss,y_train)
+
+model.score(x_train_ss,y_train)
+
+predict = model.predict_proba(x_test_ss)
+predict = pd.DataFrame(predict)
+test_predict = predict[1]>0.5
+test_predict = test_predict.replace({True:1,False:0})
+
+
+confusion_matrix(y_test,test_predict)
+f1_score(y_test,test_predict)
+
+
+
+
+##테스트 데이터로 모델정확도 추출
+#테스트 전처리
+
+test = pd.read_csv(test_path,encoding='cp949')
+
+test_col = test.columns
+
+na_col = []
+for i in test_col:
+    if sum(test[i].isnull())> 0:
+        na_col.append(i)
+        print(i,test[i].isnull().sum())
+
+
+
+
+
+
+    
+
+test['RoomService'] = test['RoomService'].fillna(0)
+test['FoodCourt'] = test['FoodCourt'].fillna(0)
+test['ShoppingMall'] = test['ShoppingMall'].fillna(0)
+test['Spa'] = test['Spa'].fillna(0)
+test['VRDeck'] = test['VRDeck'].fillna(0)
+test['CryoSleep'] = test['CryoSleep'].fillna(False)
+test['HomePlanet'] = test['HomePlanet'].fillna('Earth')
+test['Destination'] = test['Destination'].fillna('TRAPPIST-1e')
+test['Age'] = test['Age'].fillna(28)
+test['Cabin'] = test['Cabin'].fillna('F/0/P')
+test['VIP'] = test['VIP'].fillna(False)
+test['VRDeck'] = test['VRDeck'].fillna(0)
+test['Name'] = test['Name'].fillna(99999)
+
+na_col = []
+for i in test_col:
+    if sum(test[i].isnull())> 0:
+        na_col.append(i)
+        print(i,test[i].isnull().sum())
+
+test2 = test
+
+##
+
+test2['PassengerId'] = test2['PassengerId'].str[:4]
+
+test2[['deck','num','side']] = test2['Cabin'].str.split('/',expand=True)
+
+
+test2.CryoSleep = test2.CryoSleep.replace({True: 1, False: 0})
+test2.VIP = test2.VIP.replace({True: 1, False: 0})
+#test2.Transported = test2.Transported.replace({True: 1, False: 0})
+test2 = test2.drop('Cabin',axis=1)
+
+
+test2[['name1','name2']] = test2['Name'].str.split(' ',expand=True)
+
+test2 = test2.drop(['Name','name1'],axis=1)
+test2['name2'] = test2['name2'].fillna(9999)
+
+
+test3 = test2[['CryoSleep','RoomService','FoodCourt','ShoppingMall','Spa','VRDeck','HomePlanet'
+                 ,'Destination','deck','side']]
+
+
+#one hot incoding
+test3.dtypes
+test3 = pd.get_dummies(test3)
+
+test3.shape
+train33.shape
+list(train33.columns)
+list(test3.columns)
+
+
+
+
+
+
+
+
+#final
+test_answer_path = 'D:\\bigdata\\space_titanic\\sample_submission.csv'
+test_answer = pd.read_csv(test_answer_path,encoding='cp949')
+test_answer_f = test_answer.Transported.replace({True:1,False:0})
+list(set(test_answer.Transported))
+
+ss = StandardScaler()
+test_x_ss = ss.fit_transform(test3)
+
+
+from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier
+
+
+model = XGBClassifier()
+model.fit(test_x_ss,test_answer_f)
+pred = model.predict(test_x_ss)
+
+PassengerId = test.PassengerId
+final_result = pd.DataFrame([PassengerId,pred]).T
+
+list(set(test_answer_f))
+
